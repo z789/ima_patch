@@ -1,0 +1,399 @@
+diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_api.c linux-5.4.0/security/integrity/ima/ima_api.c
+--- linux-5.4.0.orig/security/integrity/ima/ima_api.c	2019-11-25 08:32:01.000000000 +0800
++++ linux-5.4.0/security/integrity/ima/ima_api.c	2020-11-18 21:28:35.305912184 +0800
+@@ -181,7 +181,7 @@ err_out:
+  * Returns IMA_MEASURE, IMA_APPRAISE mask.
+  *
+  */
+-int ima_get_action(struct inode *inode, const struct cred *cred, u32 secid,
++int ima_get_action(struct file *file, struct inode *inode, const struct cred *cred, u32 secid,
+ 		   int mask, enum ima_hooks func, int *pcr,
+ 		   struct ima_template_desc **template_desc)
+ {
+@@ -189,7 +189,7 @@ int ima_get_action(struct inode *inode,
+ 
+ 	flags &= ima_policy_flag;
+ 
+-	return ima_match_policy(inode, cred, secid, func, mask, flags, pcr,
++	return ima_match_policy(file, inode, cred, secid, func, mask, flags, pcr,
+ 				template_desc);
+ }
+ 
+diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_appraise.c linux-5.4.0/security/integrity/ima/ima_appraise.c
+--- linux-5.4.0.orig/security/integrity/ima/ima_appraise.c	2020-11-18 22:13:51.000000000 +0800
++++ linux-5.4.0/security/integrity/ima/ima_appraise.c	2020-11-18 21:29:03.611866057 +0800
+@@ -60,7 +60,7 @@ int ima_must_appraise(struct inode *inod
+ 		return 0;
+ 
+ 	security_task_getsecid(current, &secid);
+-	return ima_match_policy(inode, current_cred(), secid, func, mask,
++	return ima_match_policy(NULL, inode, current_cred(), secid, func, mask,
+ 				IMA_APPRAISE | IMA_HASH, NULL, NULL);
+ }
+ 
+diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_fs.c linux-5.4.0/security/integrity/ima/ima_fs.c
+--- linux-5.4.0.orig/security/integrity/ima/ima_fs.c	2020-11-18 22:13:51.000000000 +0800
++++ linux-5.4.0/security/integrity/ima/ima_fs.c	2020-11-18 18:22:12.224386833 +0800
+@@ -422,7 +422,7 @@ static int ima_release_policy(struct ino
+ 			    "policy_update", cause, !valid_policy, 0);
+ 
+ 	if (!valid_policy) {
+-		ima_delete_rules();
++		ima_delete_temp_rules();
+ 		valid_policy = 1;
+ 		clear_bit(IMA_FS_BUSY, &ima_fs_flags);
+ 		return 0;
+diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima.h linux-5.4.0/security/integrity/ima/ima.h
+--- linux-5.4.0.orig/security/integrity/ima/ima.h	2020-11-18 22:13:51.000000000 +0800
++++ linux-5.4.0/security/integrity/ima/ima.h	2020-11-18 21:30:57.736802172 +0800
+@@ -207,7 +207,7 @@ extern const char *const func_tokens[];
+ struct modsig;
+ 
+ /* LIM API function definitions */
+-int ima_get_action(struct inode *inode, const struct cred *cred, u32 secid,
++int ima_get_action(struct file *file, struct inode *inode, const struct cred *cred, u32 secid,
+ 		   int mask, enum ima_hooks func, int *pcr,
+ 		   struct ima_template_desc **template_desc);
+ int ima_must_measure(struct inode *inode, int mask, enum ima_hooks func);
+@@ -234,14 +234,15 @@ void ima_free_template_entry(struct ima_
+ const char *ima_d_path(const struct path *path, char **pathbuf, char *filename);
+ 
+ /* IMA policy related functions */
+-int ima_match_policy(struct inode *inode, const struct cred *cred, u32 secid,
++int ima_match_policy(struct file *file, struct inode *inode, const struct cred *cred, u32 secid,
+ 		     enum ima_hooks func, int mask, int flags, int *pcr,
+ 		     struct ima_template_desc **template_desc);
+ void ima_init_policy(void);
+ void ima_update_policy(void);
+ void ima_update_policy_flag(void);
+ ssize_t ima_parse_add_rule(char *);
+-void ima_delete_rules(void);
++void ima_delete_rules(struct list_head *head);
++void ima_delete_temp_rules(void);
+ int ima_check_policy(void);
+ void *ima_policy_start(struct seq_file *m, loff_t *pos);
+ void *ima_policy_next(struct seq_file *m, void *v, loff_t *pos);
+diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_main.c linux-5.4.0/security/integrity/ima/ima_main.c
+--- linux-5.4.0.orig/security/integrity/ima/ima_main.c	2020-11-18 22:13:51.000000000 +0800
++++ linux-5.4.0/security/integrity/ima/ima_main.c	2020-11-18 21:38:07.110193832 +0800
+@@ -214,7 +214,7 @@ static int process_measurement(struct fi
+ 	 * bitmask based on the appraise/audit/measurement policy.
+ 	 * Included is the appraise submask.
+ 	 */
+-	action = ima_get_action(inode, cred, secid, mask, func, &pcr,
++	action = ima_get_action(file, inode, cred, secid, mask, func, &pcr,
+ 				&template_desc);
+ 	violation_check = ((func == FILE_CHECK || func == MMAP_CHECK) &&
+ 			   (ima_policy_flag & IMA_MEASURE));
+@@ -664,7 +664,7 @@ void process_buffer_measurement(const vo
+ 	 */
+ 	if (func) {
+ 		security_task_getsecid(current, &secid);
+-		action = ima_get_action(NULL, current_cred(), secid, 0, func,
++		action = ima_get_action(NULL, NULL, current_cred(), secid, 0, func,
+ 					&pcr, &template);
+ 		if (!(action & IMA_MEASURE))
+ 			return;
+diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_policy.c linux-5.4.0/security/integrity/ima/ima_policy.c
+--- linux-5.4.0.orig/security/integrity/ima/ima_policy.c	2020-11-18 22:13:51.000000000 +0800
++++ linux-5.4.0/security/integrity/ima/ima_policy.c	2020-11-18 21:38:38.991634963 +0800
+@@ -34,6 +34,8 @@
+ #define IMA_EUID	0x0080
+ #define IMA_PCR		0x0100
+ #define IMA_FSNAME	0x0200
++//#define IMA_KEYRINGS    0x0400 
++#define IMA_PATH        0x0800
+ 
+ #define UNKNOWN		0
+ #define MEASURE		0x0001	/* same as IMA_MEASURE */
+@@ -51,6 +53,7 @@ int ima_policy_flag;
+ static int temp_ima_appraise;
+ static int build_ima_appraise __ro_after_init;
+ 
++#define MAX_LEN_FSNAME 16
+ #define MAX_LSM_RULES 6
+ enum lsm_rule_types { LSM_OBJ_USER, LSM_OBJ_ROLE, LSM_OBJ_TYPE,
+ 	LSM_SUBJ_USER, LSM_SUBJ_ROLE, LSM_SUBJ_TYPE
+@@ -78,7 +81,9 @@ struct ima_rule_entry {
+ 		void *args_p;	/* audit value */
+ 		int type;	/* audit type */
+ 	} lsm[MAX_LSM_RULES];
+-	char *fsname;
++	//char *fsname;
++	char fsname[MAX_LEN_FSNAME];
++	char path_prefix[NAME_MAX];
+ 	struct ima_template_desc *template;
+ };
+ 
+@@ -200,6 +205,7 @@ static struct ima_rule_entry secure_boot
+ 
+ /* An array of architecture specific rules */
+ static struct ima_rule_entry *arch_policy_entry __ro_after_init;
++static int arch_entries;
+ 
+ static LIST_HEAD(ima_default_rules);
+ static LIST_HEAD(ima_policy_rules);
+@@ -249,15 +255,30 @@ static int __init default_appraise_polic
+ }
+ __setup("ima_appraise_tcb", default_appraise_policy_setup);
+ 
+-static void ima_lsm_free_rule(struct ima_rule_entry *entry)
++static void free_init_rule(struct ima_rule_entry *entry)
+ {
+ 	int i;
+ 
++	if (!entry)
++		return;
++
+ 	for (i = 0; i < MAX_LSM_RULES; i++) {
+ 		security_filter_rule_free(entry->lsm[i].rule);
+ 		kfree(entry->lsm[i].args_p);
+ 	}
++	return;
++}
++
++static void free_rule(struct ima_rule_entry *entry)
++{
++	free_init_rule(entry);
+ 	kfree(entry);
++	return;
++}
++
++static void ima_lsm_free_rule(struct ima_rule_entry *entry)
++{
++	free_rule(entry);
+ }
+ 
+ static struct ima_rule_entry *ima_lsm_copy_rule(struct ima_rule_entry *entry)
+@@ -265,7 +286,7 @@ static struct ima_rule_entry *ima_lsm_co
+ 	struct ima_rule_entry *nentry;
+ 	int i;
+ 
+-	nentry = kmalloc(sizeof(*nentry), GFP_KERNEL);
++	nentry = kzalloc(sizeof(*nentry), GFP_KERNEL);
+ 	if (!nentry)
+ 		return NULL;
+ 
+@@ -355,6 +376,25 @@ int ima_lsm_policy_change(struct notifie
+ 	return NOTIFY_OK;
+ }
+ 
++static bool ima_match_path(const char *path_prefix, const struct file *file)
++{
++        char filename[NAME_MAX] = {0};
++        const char *pathname = NULL;
++        char *pathbuf = NULL;
++        bool matched = false;
++
++        if (!path_prefix || !file)
++                goto end;
++
++        pathname = ima_d_path(&file->f_path, &pathbuf, filename);
++        matched = !strncmp(path_prefix, pathname, strlen(path_prefix));
++        if (pathbuf)
++                __putname(pathbuf);
++
++end:
++        return matched;
++}
++
+ /**
+  * ima_match_rules - determine whether an inode matches the policy rule.
+  * @rule: a pointer to a rule
+@@ -366,8 +406,8 @@ int ima_lsm_policy_change(struct notifie
+  *
+  * Returns true on rule match, false on failure.
+  */
+-static bool ima_match_rules(struct ima_rule_entry *rule, struct inode *inode,
+-			    const struct cred *cred, u32 secid,
++static bool ima_match_rules(struct ima_rule_entry *rule, struct file *file,
++                            struct inode *inode, const struct cred *cred, u32 secid,
+ 			    enum ima_hooks func, int mask)
+ {
+ 	int i;
+@@ -392,6 +432,9 @@ static bool ima_match_rules(struct ima_r
+ 	if ((rule->flags & IMA_FSNAME)
+ 	    && strcmp(rule->fsname, inode->i_sb->s_type->name))
+ 		return false;
++	if ((rule->flags & IMA_PATH)
++	    && !ima_match_path(rule->path_prefix, file))
++		return false;
+ 	if ((rule->flags & IMA_FSUUID) &&
+ 	    !uuid_equal(&rule->fsuuid, &inode->i_sb->s_uuid))
+ 		return false;
+@@ -489,7 +532,7 @@ static int get_subaction(struct ima_rule
+  * list when walking it.  Reads are many orders of magnitude more numerous
+  * than writes so ima_match_policy() is classical RCU candidate.
+  */
+-int ima_match_policy(struct inode *inode, const struct cred *cred, u32 secid,
++int ima_match_policy(struct file *file, struct inode *inode, const struct cred *cred, u32 secid,
+ 		     enum ima_hooks func, int mask, int flags, int *pcr,
+ 		     struct ima_template_desc **template_desc)
+ {
+@@ -505,7 +548,7 @@ int ima_match_policy(struct inode *inode
+ 		if (!(entry->action & actmask))
+ 			continue;
+ 
+-		if (!ima_match_rules(entry, inode, cred, secid, func, mask))
++		if (!ima_match_rules(entry, file, inode, cred, secid, func, mask))
+ 			continue;
+ 
+ 		action |= entry->flags & IMA_ACTION_FLAGS;
+@@ -635,6 +678,7 @@ static int __init ima_init_arch_policy(v
+ 		if (result) {
+ 			pr_warn("Skipping unknown architecture policy rule: %s\n",
+ 				rule);
++			free_init_rule(&arch_policy_entry[i]);
+ 			memset(&arch_policy_entry[i], 0,
+ 			       sizeof(*arch_policy_entry));
+ 			continue;
+@@ -644,6 +688,16 @@ static int __init ima_init_arch_policy(v
+ 	return i;
+ }
+ 
++static void free_arch_policy(void)
++{
++       int i = 0;
++
++       for (i = 0; i < arch_entries; i++) 
++               free_init_rule(&arch_policy_entry[i]);
++
++       kfree(arch_policy_entry);
++}
++
+ /**
+  * ima_init_policy - initialize the default measure rules.
+  *
+@@ -652,7 +706,7 @@ static int __init ima_init_arch_policy(v
+  */
+ void __init ima_init_policy(void)
+ {
+-	int build_appraise_entries, arch_entries;
++	int build_appraise_entries;
+ 
+ 	/* if !ima_policy, we load NO default rules */
+ 	if (ima_policy)
+@@ -741,6 +795,7 @@ void ima_update_policy(void)
+ {
+ 	struct list_head *policy = &ima_policy_rules;
+ 
++	ima_delete_rules(policy);
+ 	list_splice_tail_init_rcu(&ima_temp_rules, policy, synchronize_rcu);
+ 
+ 	if (ima_rules != policy) {
+@@ -753,7 +808,8 @@ void ima_update_policy(void)
+ 		 * on boot.  After loading a custom policy, free the
+ 		 * architecture specific rules stored as an array.
+ 		 */
+-		kfree(arch_policy_entry);
++		//kfree(arch_policy_entry);
++		free_arch_policy();
+ 	}
+ 	ima_update_policy_flag();
+ }
+@@ -770,7 +826,8 @@ enum {
+ 	Opt_uid_gt, Opt_euid_gt, Opt_fowner_gt,
+ 	Opt_uid_lt, Opt_euid_lt, Opt_fowner_lt,
+ 	Opt_appraise_type, Opt_appraise_flag,
+-	Opt_permit_directio, Opt_pcr, Opt_template, Opt_err
++	Opt_permit_directio, Opt_pcr, Opt_template,
++        Opt_path_prefix, Opt_err
+ };
+ 
+ static const match_table_t policy_tokens = {
+@@ -806,6 +863,7 @@ static const match_table_t policy_tokens
+ 	{Opt_permit_directio, "permit_directio"},
+ 	{Opt_pcr, "pcr=%s"},
+ 	{Opt_template, "template=%s"},
++        {Opt_path_prefix, "path_prefix=%s"},
+ 	{Opt_err, NULL}
+ };
+ 
+@@ -1051,11 +1109,14 @@ static int ima_parse_rule(char *rule, st
+ 		case Opt_fsname:
+ 			ima_log_string(ab, "fsname", args[0].from);
+ 
++			#if 0
+ 			entry->fsname = kstrdup(args[0].from, GFP_KERNEL);
+ 			if (!entry->fsname) {
+ 				result = -ENOMEM;
+ 				break;
+ 			}
++			#endif
++			strncpy(entry->fsname, args[0].from, sizeof(entry->fsname));
+ 			result = 0;
+ 			entry->flags |= IMA_FSNAME;
+ 			break;
+@@ -1227,6 +1288,13 @@ static int ima_parse_rule(char *rule, st
+ 						 &(template_desc->num_fields));
+ 			entry->template = template_desc;
+ 			break;
++                case Opt_path_prefix:
++                        ima_log_string(ab, "path_prefix", args[0].from);
++
++                        strncpy(entry->path_prefix, args[0].from, sizeof(entry->path_prefix));
++                        result = 0;
++                        entry->flags |= IMA_PATH;
++                        break;
+ 		case Opt_err:
+ 			ima_log_string(ab, "UNKNOWN", p);
+ 			result = -EINVAL;
+@@ -1282,7 +1350,8 @@ ssize_t ima_parse_add_rule(char *rule)
+ 
+ 	result = ima_parse_rule(p, entry);
+ 	if (result) {
+-		kfree(entry);
++		//kfree(entry);
++		free_rule(entry);
+ 		integrity_audit_msg(AUDIT_INTEGRITY_STATUS, NULL,
+ 				    NULL, op, "invalid-policy", result,
+ 				    audit_info);
+@@ -1294,25 +1363,19 @@ ssize_t ima_parse_add_rule(char *rule)
+ 	return len;
+ }
+ 
+-/**
+- * ima_delete_rules() called to cleanup invalid in-flight policy.
+- * We don't need locking as we operate on the temp list, which is
+- * different from the active one.  There is also only one user of
+- * ima_delete_rules() at a time.
+- */
+-void ima_delete_rules(void)
++void ima_delete_rules(struct list_head *head)
+ {
+-	struct ima_rule_entry *entry, *tmp;
+-	int i;
++       struct ima_rule_entry *entry, *tmp;
+ 
+-	temp_ima_appraise = 0;
+-	list_for_each_entry_safe(entry, tmp, &ima_temp_rules, list) {
+-		for (i = 0; i < MAX_LSM_RULES; i++)
+-			kfree(entry->lsm[i].args_p);
++       list_for_each_entry_safe(entry, tmp, head, list) {
++               list_del(&entry->list);
++               free_rule(entry);
++       }
++}
+ 
+-		list_del(&entry->list);
+-		kfree(entry);
+-	}
++void ima_delete_temp_rules(void)
++{
++	ima_delete_rules(&ima_temp_rules);
+ }
+ 
+ #define __ima_hook_stringify(str)	(#str),
+@@ -1434,6 +1497,12 @@ int ima_policy_show(struct seq_file *m,
+ 		seq_puts(m, " ");
+ 	}
+ 
++	if (entry->flags & IMA_PATH) {
++		snprintf(tbuf, sizeof(tbuf), "%s", entry->path_prefix);
++		seq_printf(m, pt(Opt_path_prefix), tbuf);
++		seq_puts(m, " ");
++	}
++
+ 	if (entry->flags & IMA_PCR) {
+ 		snprintf(tbuf, sizeof(tbuf), "%d", entry->pcr);
+ 		seq_printf(m, pt(Opt_pcr), tbuf);
