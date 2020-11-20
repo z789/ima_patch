@@ -19,40 +19,44 @@
        增加 path_prefix过滤条件（例如：path_prefix="/var/")
        
     该patch的目的是解决上面的 2/3/4 三个问题。问题1可以通过开启相关的编译选项解决。
+    增加恢复系统默认策略的功能：
+      echo default > /sys/kernel/security/ima/policy
  
  
  例子：
-    不度量/var/目录下文件读操作的 配置（/var/下文件的执行操作仍度量） 文件/root/custom_ima_policy内容：
-    
-     dont_measure fsmagic=0x9fa0 
-     dont_measure fsmagic=0x62656572 
-     dont_measure fsmagic=0x64626720 
-     dont_measure fsmagic=0x1021994 
-     dont_measure fsmagic=0x1cd1 
-     dont_measure fsmagic=0x42494e4d 
-     dont_measure fsmagic=0x73636673 
-     dont_measure fsmagic=0xf97cff8c 
-     dont_measure fsmagic=0x43415d53 
-     dont_measure fsmagic=0x27e0eb 
-     dont_measure fsmagic=0x63677270 
-     dont_measure fsmagic=0x6e736673 
+    不度量/var/目录下读文件的配置（/var/下文件的执行操作仍度量） 文件/root/custom_ima_policy内容：
+
+	dont_measure fsmagic=0x9fa0 
+	dont_measure fsmagic=0x62656572 
+	dont_measure fsmagic=0x64626720 
+	dont_measure fsmagic=0x1021994 
+	dont_measure fsmagic=0x1cd1 
+	dont_measure fsmagic=0x42494e4d 
+	dont_measure fsmagic=0x73636673 
+	dont_measure fsmagic=0xf97cff8c 
+	dont_measure fsmagic=0x43415d53 
+	dont_measure fsmagic=0x27e0eb 
+	dont_measure fsmagic=0x63677270 
+	dont_measure fsmagic=0x6e736673 
 	dont_measure fsmagic=0xde5e81e4 
 	measure func=MMAP_CHECK mask=MAY_EXEC 
 	measure func=BPRM_CHECK mask=MAY_EXEC 
-	dont_measure func=FILE_CHECK mask=MAY_READ  path_prefix=/var/
+	dont_measure func=FILE_CHECK mask=^MAY_READ path_prefix=/var/ 
+	dont_measure func=FILE_CHECK mask=^MAY_READ path_prefix=/tmp/ 
 	measure func=FILE_CHECK mask=^MAY_READ euid=0 
 	measure func=FILE_CHECK mask=^MAY_READ uid=0 
 	measure func=MODULE_CHECK 
 	measure func=FIRMWARE_CHECK 
 	measure func=POLICY_CHECK 
 	measure func=KEXEC_KERNEL_CHECK 
-	measure func=MODULE_CHEC
+	measure func=MODULE_CHECK 
   
        
-     其中策略： dont_measure func=FILE_CHECK mask=MAY_READ  path_prefix=/var/是在默认策略基础上添加的    
+     其中策略： dont_measure func=FILE_CHECK mask=MAY_READ  path_prefix=/var/和 
+                dont_measure func=FILE_CHECK mask=^MAY_READ path_prefix=/tmp/是在默认策略基础上添加的    
      
      通过以下命令启用策略：
      echo /root/custom_ima_policy > /sys/kernel/security/ima/policy
      
-     则 读/var/下的文件就不度量了。
+     这时uid==0或者euid==0用户的读取 /var/下的文件就不会度量了。
         
