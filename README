@@ -10,21 +10,21 @@
    
 存在的问题：
     1. 没有开启策略文件 /sys/kernel/security/ima/policy的读权限。
-    2. 当向 /sys/kernel/security/ima/policy设置策略时，如果策略中有fsname=过滤条件（如fsname="ext4"), 且在设置策略失败时，
-       内核发生内存泄漏。
+    2. 当向 /sys/kernel/security/ima/policy设置策略时，如果策略中有fsname=过滤条件（如fsname="ext4"), 在设置策略失败时，
+       内核泄漏内存。
     3. 用户设置策略，只能添加。 而不是清除原来的策略，使用新策略。
     4. uid为0或者euid为0的用户， 读取的文件不一定都要度量。例如 /tmp  /var/目录下的文件可以不度量（特别是日志文件）。
        现在可以设置 /tmp  /var/下文件的label配合selinux进行过滤。 
        但是在ubuntu上，使用的是apparmor，而apparmor的策略是基于路径的。为了适应ubuntu和习惯设置基于路径的策略的用户，
        增加 path_prefix过滤条件（例如：path_prefix="/var/")
        
-    该patch的目的是解决上面的 2/3/4 三个问题。问题1可以通过开启相关的编译选项解决。
-    增加恢复系统默认策略的功能：
+    该patch的目的是解决上面的 2/3/4 三个问题，增加恢复系统默认策略的功能。问题1可以通过开启相关的编译选项解决。
+    恢复系统默认策略：
       echo default > /sys/kernel/security/ima/policy
  
  
  例子：
-    不度量/var/目录下读文件的配置（/var/下文件的执行操作仍度量） 文件/root/custom_ima_policy内容：
+    不度量/var/目录下文件读取操作的配置（/var/下文件的执行操作仍度量） 文件/root/custom_ima_policy内容：
 
 	dont_measure fsmagic=0x9fa0 
 	dont_measure fsmagic=0x62656572 
@@ -52,11 +52,11 @@
 	measure func=MODULE_CHECK 
   
        
-     其中策略： dont_measure func=FILE_CHECK mask=MAY_READ  path_prefix=/var/和 
-                dont_measure func=FILE_CHECK mask=^MAY_READ path_prefix=/tmp/是在默认策略基础上添加的    
+     其中策略 dont_measure func=FILE_CHECK mask=^MAY_READ  path_prefix=/var/和 
+              dont_measure func=FILE_CHECK mask=^MAY_READ path_prefix=/tmp/是在默认策略基础上添加的.    
      
-     通过以下命令启用策略：
+     通过以下命令启用定制的策略：
      echo /root/custom_ima_policy > /sys/kernel/security/ima/policy
      
-     这时uid==0或者euid==0用户的读取 /var/下的文件就不会度量了。
+     这时uid==0或者euid==0用户读取 /var/、/tmp/下的文件就不再度量了。
         
