@@ -1,6 +1,6 @@
 diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_api.c linux-5.4.0/security/integrity/ima/ima_api.c
---- linux-5.4.0.orig/security/integrity/ima/ima_api.c	2020-11-20 11:45:43.977123371 +0800
-+++ linux-5.4.0/security/integrity/ima/ima_api.c	2020-11-20 16:20:48.167704513 +0800
+--- linux-5.4.0.orig/security/integrity/ima/ima_api.c	2020-11-22 18:14:59.271722637 +0800
++++ linux-5.4.0/security/integrity/ima/ima_api.c	2020-11-22 01:17:29.406249388 +0800
 @@ -181,7 +181,7 @@ err_out:
   * Returns IMA_MEASURE, IMA_APPRAISE mask.
   *
@@ -19,9 +19,29 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_api.c linux-5.4.0/securit
  				template_desc);
  }
  
+@@ -294,7 +294,9 @@ void ima_store_measurement(struct integr
+ 			   struct file *file, const unsigned char *filename,
+ 			   struct evm_ima_xattr_data *xattr_value,
+ 			   int xattr_len, const struct modsig *modsig, int pcr,
+-			   struct ima_template_desc *template_desc)
++			   struct ima_template_desc *template_desc, int mask,
++			   enum ima_hooks func)
++
+ {
+ 	static const char op[] = "add_template_measure";
+ 	static const char audit_cause[] = "ENOMEM";
+@@ -304,6 +306,8 @@ void ima_store_measurement(struct integr
+ 	struct ima_event_data event_data = { .iint = iint,
+ 					     .file = file,
+ 					     .filename = filename,
++					     .mask = mask,
++                                             .func = func,
+ 					     .xattr_value = xattr_value,
+ 					     .xattr_len = xattr_len,
+ 					     .modsig = modsig };
 diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_appraise.c linux-5.4.0/security/integrity/ima/ima_appraise.c
---- linux-5.4.0.orig/security/integrity/ima/ima_appraise.c	2020-11-20 11:45:43.977123371 +0800
-+++ linux-5.4.0/security/integrity/ima/ima_appraise.c	2020-11-20 16:20:48.171703892 +0800
+--- linux-5.4.0.orig/security/integrity/ima/ima_appraise.c	2020-11-22 18:14:59.271722637 +0800
++++ linux-5.4.0/security/integrity/ima/ima_appraise.c	2020-11-21 09:57:14.212632613 +0800
 @@ -60,7 +60,7 @@ int ima_must_appraise(struct inode *inod
  		return 0;
  
@@ -32,8 +52,8 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_appraise.c linux-5.4.0/se
  }
  
 diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_fs.c linux-5.4.0/security/integrity/ima/ima_fs.c
---- linux-5.4.0.orig/security/integrity/ima/ima_fs.c	2020-11-20 11:45:43.977123371 +0800
-+++ linux-5.4.0/security/integrity/ima/ima_fs.c	2020-11-20 16:20:48.171703892 +0800
+--- linux-5.4.0.orig/security/integrity/ima/ima_fs.c	2020-11-22 18:14:59.271722637 +0800
++++ linux-5.4.0/security/integrity/ima/ima_fs.c	2020-11-21 09:57:14.212632613 +0800
 @@ -25,6 +25,8 @@
  
  #include "ima.h"
@@ -64,9 +84,70 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_fs.c linux-5.4.0/security
  		clear_bit(IMA_FS_BUSY, &ima_fs_flags);
  		return 0;
 diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima.h linux-5.4.0/security/integrity/ima/ima.h
---- linux-5.4.0.orig/security/integrity/ima/ima.h	2020-11-20 11:45:43.977123371 +0800
-+++ linux-5.4.0/security/integrity/ima/ima.h	2020-11-20 16:20:48.171703892 +0800
-@@ -207,7 +207,7 @@ extern const char *const func_tokens[];
+--- linux-5.4.0.orig/security/integrity/ima/ima.h	2020-11-22 18:14:59.271722637 +0800
++++ linux-5.4.0/security/integrity/ima/ima.h	2020-11-22 01:16:26.105219183 +0800
+@@ -32,9 +32,36 @@ enum ima_show_type { IMA_SHOW_BINARY, IM
+ 		     IMA_SHOW_BINARY_OLD_STRING_FMT, IMA_SHOW_ASCII };
+ enum tpm_pcrs { TPM_PCR0 = 0, TPM_PCR8 = 8 };
+ 
++#define __ima_hooks(hook)		\
++	hook(NONE)			\
++	hook(FILE_CHECK)		\
++	hook(MMAP_CHECK)		\
++	hook(BPRM_CHECK)		\
++	hook(CREDS_CHECK)		\
++	hook(POST_SETATTR)		\
++	hook(MODULE_CHECK)		\
++	hook(FIRMWARE_CHECK)		\
++	hook(KEXEC_KERNEL_CHECK)	\
++	hook(KEXEC_INITRAMFS_CHECK)	\
++	hook(POLICY_CHECK)		\
++	hook(KEXEC_CMDLINE)		\
++	hook(MAX_CHECK)
++#define __ima_hook_enumify(ENUM)	ENUM,
++
++enum ima_hooks {
++	__ima_hooks(__ima_hook_enumify)
++};
++
++#ifdef	CONFIG_IMA_READ_POLICY
++enum mask_func {
++	mask_exec = 0, mask_write, mask_read, mask_append
++};
++#endif
++
+ /* digest size for IMA, fits SHA1 or MD5 */
+ #define IMA_DIGEST_SIZE		SHA1_DIGEST_SIZE
+ #define IMA_EVENT_NAME_LEN_MAX	255
++#define IMA_EVENT_FMODE_LEN_MAX	255
+ 
+ #define IMA_HASH_BITS 10
+ #define IMA_MEASURE_HTABLE_SIZE (1 << IMA_HASH_BITS)
+@@ -59,6 +86,8 @@ struct ima_event_data {
+ 	struct integrity_iint_cache *iint;
+ 	struct file *file;
+ 	const unsigned char *filename;
++	int mask;
++	enum ima_hooks func;
+ 	struct evm_ima_xattr_data *xattr_value;
+ 	int xattr_len;
+ 	const struct modsig *modsig;
+@@ -182,6 +211,7 @@ static inline unsigned int ima_hash_key(
+ 	return (digest[0] | digest[1] << 8) % IMA_MEASURE_HTABLE_SIZE;
+ }
+ 
++#if 0
+ #define __ima_hooks(hook)		\
+ 	hook(NONE)			\
+ 	hook(FILE_CHECK)		\
+@@ -201,13 +231,14 @@ static inline unsigned int ima_hash_key(
+ enum ima_hooks {
+ 	__ima_hooks(__ima_hook_enumify)
+ };
++#endif
+ 
+ extern const char *const func_tokens[];
+ 
  struct modsig;
  
  /* LIM API function definitions */
@@ -75,7 +156,17 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima.h linux-5.4.0/security/in
  		   int mask, enum ima_hooks func, int *pcr,
  		   struct ima_template_desc **template_desc);
  int ima_must_measure(struct inode *inode, int mask, enum ima_hooks func);
-@@ -234,14 +234,15 @@ void ima_free_template_entry(struct ima_
+@@ -218,7 +249,8 @@ void ima_store_measurement(struct integr
+ 			   const unsigned char *filename,
+ 			   struct evm_ima_xattr_data *xattr_value,
+ 			   int xattr_len, const struct modsig *modsig, int pcr,
+-			   struct ima_template_desc *template_desc);
++			   struct ima_template_desc *template_desc, int mask,
++			   enum ima_hooks func);
+ void process_buffer_measurement(const void *buf, int size,
+ 				const char *eventname, enum ima_hooks func,
+ 				int pcr);
+@@ -234,14 +266,15 @@ void ima_free_template_entry(struct ima_
  const char *ima_d_path(const struct path *path, char **pathbuf, char *filename);
  
  /* IMA policy related functions */
@@ -93,9 +184,10 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima.h linux-5.4.0/security/in
  int ima_check_policy(void);
  void *ima_policy_start(struct seq_file *m, loff_t *pos);
  void *ima_policy_next(struct seq_file *m, void *v, loff_t *pos);
+二进制文件 linux-5.4.0.orig/security/integrity/ima/.ima.h.swp 和 linux-5.4.0/security/integrity/ima/.ima.h.swp 不同
 diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_main.c linux-5.4.0/security/integrity/ima/ima_main.c
---- linux-5.4.0.orig/security/integrity/ima/ima_main.c	2020-11-20 11:45:43.977123371 +0800
-+++ linux-5.4.0/security/integrity/ima/ima_main.c	2020-11-20 16:20:48.171703892 +0800
+--- linux-5.4.0.orig/security/integrity/ima/ima_main.c	2020-11-22 18:14:59.271722637 +0800
++++ linux-5.4.0/security/integrity/ima/ima_main.c	2020-11-22 01:17:06.381880092 +0800
 @@ -214,7 +214,7 @@ static int process_measurement(struct fi
  	 * bitmask based on the appraise/audit/measurement policy.
  	 * Included is the appraise submask.
@@ -105,6 +197,15 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_main.c linux-5.4.0/securi
  				&template_desc);
  	violation_check = ((func == FILE_CHECK || func == MMAP_CHECK) &&
  			   (ima_policy_flag & IMA_MEASURE));
+@@ -333,7 +333,7 @@ static int process_measurement(struct fi
+ 	if (action & IMA_MEASURE)
+ 		ima_store_measurement(iint, file, pathname,
+ 				      xattr_value, xattr_len, modsig, pcr,
+-				      template_desc);
++				      template_desc, mask, func);
+ 	if (rc == 0 && (action & IMA_APPRAISE_SUBMASK)) {
+ 		rc = ima_check_blacklist(iint, modsig, pcr);
+ 		if (rc != -EPERM) {
 @@ -664,7 +664,7 @@ void process_buffer_measurement(const vo
  	 */
  	if (func) {
@@ -115,8 +216,8 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_main.c linux-5.4.0/securi
  		if (!(action & IMA_MEASURE))
  			return;
 diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_policy.c linux-5.4.0/security/integrity/ima/ima_policy.c
---- linux-5.4.0.orig/security/integrity/ima/ima_policy.c	2020-11-20 11:45:43.977123371 +0800
-+++ linux-5.4.0/security/integrity/ima/ima_policy.c	2020-11-20 16:24:17.684316184 +0800
+--- linux-5.4.0.orig/security/integrity/ima/ima_policy.c	2020-11-22 18:14:59.271722637 +0800
++++ linux-5.4.0/security/integrity/ima/ima_policy.c	2020-11-22 18:01:09.169365969 +0800
 @@ -34,6 +34,8 @@
  #define IMA_EUID	0x0080
  #define IMA_PCR		0x0100
@@ -126,12 +227,13 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_policy.c linux-5.4.0/secu
  
  #define UNKNOWN		0
  #define MEASURE		0x0001	/* same as IMA_MEASURE */
-@@ -48,9 +50,13 @@
+@@ -48,9 +50,14 @@
  	(a) >= (FIELD_SIZEOF(struct integrity_iint_cache, measured_pcrs) * 8))
  
  int ima_policy_flag;
 +int default_ima_policy_flag = 0;
 +int save_ima_policy_flag = 0;   //temp save ima_policy_flag value in func ima_update_policy
++static int switch_default_first = 1;
 +
  static int temp_ima_appraise;
  static int build_ima_appraise __ro_after_init;
@@ -140,7 +242,7 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_policy.c linux-5.4.0/secu
  #define MAX_LSM_RULES 6
  enum lsm_rule_types { LSM_OBJ_USER, LSM_OBJ_ROLE, LSM_OBJ_TYPE,
  	LSM_SUBJ_USER, LSM_SUBJ_ROLE, LSM_SUBJ_TYPE
-@@ -78,7 +84,8 @@ struct ima_rule_entry {
+@@ -78,7 +85,8 @@ struct ima_rule_entry {
  		void *args_p;	/* audit value */
  		int type;	/* audit type */
  	} lsm[MAX_LSM_RULES];
@@ -150,13 +252,7 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_policy.c linux-5.4.0/secu
  	struct ima_template_desc *template;
  };
  
-@@ -200,11 +207,13 @@ static struct ima_rule_entry secure_boot
- 
- /* An array of architecture specific rules */
- static struct ima_rule_entry *arch_policy_entry __ro_after_init;
-+static int arch_entries;
- 
- static LIST_HEAD(ima_default_rules);
+@@ -205,6 +213,7 @@ static LIST_HEAD(ima_default_rules);
  static LIST_HEAD(ima_policy_rules);
  static LIST_HEAD(ima_temp_rules);
  static struct list_head *ima_rules = &ima_default_rules;
@@ -294,39 +390,7 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_policy.c linux-5.4.0/secu
  			memset(&arch_policy_entry[i], 0,
  			       sizeof(*arch_policy_entry));
  			continue;
-@@ -644,6 +695,22 @@ static int __init ima_init_arch_policy(v
- 	return i;
- }
- 
-+#if 0
-+static void free_arch_policy(void)
-+{
-+       int i = 0;
-+
-+       if (arch_entries > 0 && arch_policy_entry) {
-+               for (i = 0; i < arch_entries; i++)
-+                       free_init_rule(&arch_policy_entry[i]);
-+
-+               kfree(arch_policy_entry);
-+               arch_policy_entry = NULL;
-+               arch_entries = 0;
-+       }
-+}
-+#endif
-+
- /**
-  * ima_init_policy - initialize the default measure rules.
-  *
-@@ -652,7 +719,7 @@ static int __init ima_init_arch_policy(v
-  */
- void __init ima_init_policy(void)
- {
--	int build_appraise_entries, arch_entries;
-+	int build_appraise_entries;
- 
- 	/* if !ima_policy, we load NO default rules */
- 	if (ima_policy)
-@@ -721,7 +788,7 @@ void __init ima_init_policy(void)
+@@ -721,7 +772,7 @@ void __init ima_init_policy(void)
  /* Make sure we have a valid policy, at least containing some rules. */
  int ima_check_policy(void)
  {
@@ -335,7 +399,7 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_policy.c linux-5.4.0/secu
  		return -EINVAL;
  	return 0;
  }
-@@ -741,21 +808,25 @@ void ima_update_policy(void)
+@@ -741,21 +792,27 @@ void ima_update_policy(void)
  {
  	struct list_head *policy = &ima_policy_rules;
  
@@ -344,7 +408,6 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_policy.c linux-5.4.0/secu
  
 -	if (ima_rules != policy) {
 -		ima_policy_flag = 0;
--		ima_rules = policy;
 +        if (use_ima_default_rules) {
 +		if (ima_rules != &ima_default_rules) { 
 +			ima_rules = &ima_default_rules;
@@ -353,7 +416,8 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_policy.c linux-5.4.0/secu
 +		}
 +                use_ima_default_rules = 0;
 +	} else if (!use_ima_default_rules && ima_rules != policy) {
- 
+ 		ima_rules = policy;
+-
 -		/*
 -		 * IMA architecture specific policy rules are specified
 -		 * as strings and converted to an array of ima_entry_rules
@@ -361,9 +425,11 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_policy.c linux-5.4.0/secu
 -		 * architecture specific rules stored as an array.
 -		 */
 -		kfree(arch_policy_entry);
-+		default_ima_policy_flag = ima_policy_flag;
++		if (switch_default_first) {
++			default_ima_policy_flag = ima_policy_flag;
++			switch_default_first = 0;
++		}
 +		ima_policy_flag = save_ima_policy_flag;
-+		ima_rules = policy;
  	}
 -	ima_update_policy_flag();
 +
@@ -372,7 +438,7 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_policy.c linux-5.4.0/secu
  }
  
  /* Keep the enumeration in sync with the policy_tokens! */
-@@ -770,7 +841,8 @@ enum {
+@@ -770,7 +827,8 @@ enum {
  	Opt_uid_gt, Opt_euid_gt, Opt_fowner_gt,
  	Opt_uid_lt, Opt_euid_lt, Opt_fowner_lt,
  	Opt_appraise_type, Opt_appraise_flag,
@@ -382,7 +448,7 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_policy.c linux-5.4.0/secu
  };
  
  static const match_table_t policy_tokens = {
-@@ -806,6 +878,7 @@ static const match_table_t policy_tokens
+@@ -806,6 +864,7 @@ static const match_table_t policy_tokens
  	{Opt_permit_directio, "permit_directio"},
  	{Opt_pcr, "pcr=%s"},
  	{Opt_template, "template=%s"},
@@ -390,7 +456,7 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_policy.c linux-5.4.0/secu
  	{Opt_err, NULL}
  };
  
-@@ -1051,11 +1124,7 @@ static int ima_parse_rule(char *rule, st
+@@ -1051,11 +1110,7 @@ static int ima_parse_rule(char *rule, st
  		case Opt_fsname:
  			ima_log_string(ab, "fsname", args[0].from);
  
@@ -403,7 +469,7 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_policy.c linux-5.4.0/secu
  			result = 0;
  			entry->flags |= IMA_FSNAME;
  			break;
-@@ -1227,6 +1296,13 @@ static int ima_parse_rule(char *rule, st
+@@ -1227,6 +1282,13 @@ static int ima_parse_rule(char *rule, st
  						 &(template_desc->num_fields));
  			entry->template = template_desc;
  			break;
@@ -417,7 +483,7 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_policy.c linux-5.4.0/secu
  		case Opt_err:
  			ima_log_string(ab, "UNKNOWN", p);
  			result = -EINVAL;
-@@ -1282,7 +1358,7 @@ ssize_t ima_parse_add_rule(char *rule)
+@@ -1282,7 +1344,7 @@ ssize_t ima_parse_add_rule(char *rule)
  
  	result = ima_parse_rule(p, entry);
  	if (result) {
@@ -426,7 +492,7 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_policy.c linux-5.4.0/secu
  		integrity_audit_msg(AUDIT_INTEGRITY_STATUS, NULL,
  				    NULL, op, "invalid-policy", result,
  				    audit_info);
-@@ -1294,25 +1370,19 @@ ssize_t ima_parse_add_rule(char *rule)
+@@ -1294,25 +1356,19 @@ ssize_t ima_parse_add_rule(char *rule)
  	return len;
  }
  
@@ -462,7 +528,20 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_policy.c linux-5.4.0/secu
  }
  
  #define __ima_hook_stringify(str)	(#str),
-@@ -1434,6 +1504,12 @@ int ima_policy_show(struct seq_file *m,
+@@ -1322,11 +1378,7 @@ const char *const func_tokens[] = {
+ };
+ 
+ #ifdef	CONFIG_IMA_READ_POLICY
+-enum {
+-	mask_exec = 0, mask_write, mask_read, mask_append
+-};
+-
+-static const char *const mask_tokens[] = {
++const char *const mask_tokens[] = {
+ 	"^MAY_EXEC",
+ 	"^MAY_WRITE",
+ 	"^MAY_READ",
+@@ -1434,6 +1486,12 @@ int ima_policy_show(struct seq_file *m,
  		seq_puts(m, " ");
  	}
  
@@ -475,3 +554,106 @@ diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_policy.c linux-5.4.0/secu
  	if (entry->flags & IMA_PCR) {
  		snprintf(tbuf, sizeof(tbuf), "%d", entry->pcr);
  		seq_printf(m, pt(Opt_pcr), tbuf);
+diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_template.c linux-5.4.0/security/integrity/ima/ima_template.c
+--- linux-5.4.0.orig/security/integrity/ima/ima_template.c	2020-11-22 18:14:59.271722637 +0800
++++ linux-5.4.0/security/integrity/ima/ima_template.c	2020-11-22 13:57:49.603274301 +0800
+@@ -20,7 +20,7 @@ enum header_fields { HDR_PCR, HDR_DIGEST
+ 
+ static struct ima_template_desc builtin_templates[] = {
+ 	{.name = IMA_TEMPLATE_IMA_NAME, .fmt = IMA_TEMPLATE_IMA_FMT},
+-	{.name = "ima-ng", .fmt = "d-ng|n-ng"},
++	{.name = "ima-ng", .fmt = "d-ng|func|mode|n-ng"},
+ 	{.name = "ima-sig", .fmt = "d-ng|n-ng|sig"},
+ 	{.name = "ima-buf", .fmt = "d-ng|n-ng|buf"},
+ 	{.name = "ima-modsig", .fmt = "d-ng|n-ng|sig|d-modsig|modsig"},
+@@ -47,6 +47,11 @@ static const struct ima_template_field s
+ 	 .field_show = ima_show_template_digest_ng},
+ 	{.field_id = "modsig", .field_init = ima_eventmodsig_init,
+ 	 .field_show = ima_show_template_sig},
++
++	{.field_id = "func", .field_init = ima_event_func_init,
++	 .field_show = ima_show_template_string},
++	{.field_id = "mode", .field_init = ima_event_mode_init,
++	 .field_show = ima_show_template_string},
+ };
+ 
+ /*
+diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_template_lib.c linux-5.4.0/security/integrity/ima/ima_template_lib.c
+--- linux-5.4.0.orig/security/integrity/ima/ima_template_lib.c	2020-11-22 18:14:59.271722637 +0800
++++ linux-5.4.0/security/integrity/ima/ima_template_lib.c	2020-11-22 15:16:12.538809474 +0800
+@@ -431,6 +431,63 @@ int ima_eventname_ng_init(struct ima_eve
+ 	return ima_eventname_init_common(event_data, field_data, false);
+ }
+ 
++
++extern const char *const func_tokens[];
++/*
++ * This function writes the func of an event (without size limit).
++ */
++int ima_event_func_init(struct ima_event_data *event_data,
++			  struct ima_field_data *field_data)
++{
++	char buf[IMA_EVENT_FMODE_LEN_MAX] = {0};
++	u32 len = 0;
++
++	if (event_data->func <= 0 && event_data->func >= MAX_CHECK) 
++		return 0;
++	len = snprintf(buf, sizeof(buf), "%s", func_tokens[event_data->func]);
++
++	return ima_write_template_field_data(buf, len,
++					     DATA_FMT_STRING, field_data);
++}
++
++extern const char *const mask_tokens[];
++/*
++ * This function writes the mask of an event (without size limit).
++ */
++int ima_event_mode_init(struct ima_event_data *event_data,
++			  struct ima_field_data *field_data)
++{
++	char buf[IMA_EVENT_FMODE_LEN_MAX] = {0};
++	u32 len = 0;
++	u32 i = 0;
++
++	if ((event_data->mask & (MAY_EXEC|MAY_WRITE|MAY_READ|MAY_APPEND)) == 0)
++		return 0;
++
++	if (event_data->mask & MAY_EXEC) {
++		len = snprintf(buf+i, sizeof(buf)-i, "%s-", mask_tokens[mask_exec]+1);
++		i += len;
++	}
++	if (event_data->mask & MAY_WRITE) {
++		len = snprintf(buf+i, sizeof(buf)-i, "%s-", mask_tokens[mask_write]+1);
++		i += len;
++	}
++	if (event_data->mask & MAY_READ) {
++		len = snprintf(buf+i, sizeof(buf)-i, "%s-", mask_tokens[mask_read]+1);
++		i += len;
++	}
++	if (event_data->mask & MAY_APPEND) {
++		len = snprintf(buf+i, sizeof(buf)-i, "%s-", mask_tokens[mask_append]+1);
++		i += len;
++	}
++
++	if (i > 0 && buf[i-1] == '-')
++		buf[i-1] = '\0';
++
++	return ima_write_template_field_data(buf, i,
++					     DATA_FMT_STRING, field_data);
++}
++
+ /*
+  *  ima_eventsig_init - include the file signature as part of the template data
+  */
+diff -Nurp linux-5.4.0.orig/security/integrity/ima/ima_template_lib.h linux-5.4.0/security/integrity/ima/ima_template_lib.h
+--- linux-5.4.0.orig/security/integrity/ima/ima_template_lib.h	2020-11-22 18:14:59.271722637 +0800
++++ linux-5.4.0/security/integrity/ima/ima_template_lib.h	2020-11-22 14:11:46.623534356 +0800
+@@ -46,4 +46,8 @@ int ima_eventbuf_init(struct ima_event_d
+ 		      struct ima_field_data *field_data);
+ int ima_eventmodsig_init(struct ima_event_data *event_data,
+ 			 struct ima_field_data *field_data);
++int ima_event_func_init(struct ima_event_data *event_data,
++			  struct ima_field_data *field_data);
++int ima_event_mode_init(struct ima_event_data *event_data,
++			  struct ima_field_data *field_data);
+ #endif /* __LINUX_IMA_TEMPLATE_LIB_H */

@@ -19,8 +19,18 @@
        增加 path_prefix过滤条件（例如：path_prefix="/var/")
        
     该patch的目的是解决上面的 2/3/4 三个问题，增加恢复系统默认策略的功能。问题1可以通过开启相关的编译选项解决。
-    恢复系统默认策略：
+
+增加以下功能：
+    1. 恢复系统默认策略：
       echo default > /sys/kernel/security/ima/policy
+    2. 度量结果增加 func 和 mask字段。
+       func 表示度量的位置。 BPRM_CHECK是执行可执行文件时，MMAP_CHECK是加载so库时，
+                             FILE_CHECK是open打开文件时。 
+       maske: MAY_EXEC MAY_READ  MAY_WRITE  MAY_APPEND 之一或其中几个     
+
+      10 8432d508d76ff6ca76e5e0ef48360840c082f25d ima-ng sha1:732458574c63c3790cad093a36eadfb990d11ee6 BPRM_CHECK MAY_EXEC /bin/ls
+      10 8dbfc28e49502bdddb4113b4b82a4ccf23a0e6b7 ima-ng sha1:5324a23db0f0f7676974c015163f18ec0929ac34 MMAP_CHECK MAY_EXEC /usr/lib/gcc/x86_64-linux-gnu/9/liblto_plugin.so.0.0.0
+      10 0105b1ca71e59d7cc50e4e0eb0878592feeb7bb2 ima-ng sha1:9e886a7dec52bbf1bf826f217baaf1f6e0f9216d FILE_CHECK MAY_READ /var/llll
  
  
  例子：
